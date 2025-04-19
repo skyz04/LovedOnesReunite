@@ -3,8 +3,15 @@ from fastapi.responses import JSONResponse
 from datetime import date
 from uuid import uuid4
 import os
+import uvicorn
+from bson import ObjectId
+from utils.db import fs_bucket
+import io
+from bson import ObjectId
+from utils.db import fs_bucket
+from fastapi import UploadFile
 
-from db import missing_collection, image_uploads_collection, sightings_collection
+from utils.db import missing_collection, image_uploads_collection, sightings_collection
 
 app = FastAPI()
 
@@ -12,18 +19,24 @@ UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-def save_uploaded_file(file: UploadFile) -> str:
-    file_ext = file.filename.split(".")[-1]
-    filename = f"{uuid4()}.{file_ext}"
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    with open(filepath, "wb") as buffer:
-        buffer.write(file.file.read())
-    return filename
+# async def save_uploaded_file(file: UploadFile) -> ObjectId:
+async def save_uploaded_file(file: UploadFile) -> str:
+    if not file or not file.filename:
+        raise ValueError("Invalid file upload: filename is missing")
+
+    contents = await file.read()
+
+    # Wrap in a BytesIO stream
+    stream = io.BytesIO(contents)
+
+    # Upload to GridFS
+    # file_id = await fs_bucket.upload_from_stream(file.filename, stream)
+    file_id = str(uuid4())
+
+    return file_id  # This is an ObjectId (not awaitable)
 
 
-# -----------------------
-# Endpoint 1: Report Missing
-# -----------------------
+# Report missing: Someone you know
 @app.post("/report-missing")
 async def report_missing(
     photo: UploadFile = File(...),
@@ -32,12 +45,14 @@ async def report_missing(
     age: int = Form(...),
     height: float = Form(...),
     weight: float = Form(...),
-    last_seen_location: str = Form(...),
+    lat: float = Form(...),
+    lon: float = Form(...),
     missing_since: date = Form(...),
     description: str = Form(...),
     reward: float = Form(None),
+    phone_number: str = Form(...),
 ):
-    photo_filename = save_uploaded_file(photo)
+    photo_filename = await save_uploaded_file(photo)
 
     data = {
         "first_name": first_name,
@@ -45,15 +60,16 @@ async def report_missing(
         "age": age,
         "height": height,
         "weight": weight,
-        "last_seen_location": last_seen_location,
+        "last_seen_location": {"lat": lat, "lon": lon},
         "missing_since": str(missing_since),
         "description": description,
         "reward": reward,
+        "phone_number": phone_number,
         "photo_filename": photo_filename,
     }
 
-    result = await missing_collection.insert_one(data)
-
+    # result = await missing_collection.insert_one(data)
+    """
     return JSONResponse(
         content={
             "message": "Missing report submitted",
@@ -61,17 +77,23 @@ async def report_missing(
             "data": data,
         }
     )
+    """
+    return JSONResponse(
+        content={
+            "message": "Missing report submitted",
+            "id": "1",
+            "data": data,
+        }
+    )
 
 
-# -----------------------
-# Endpoint 2: Image Upload
-# -----------------------
+# Upload Poster for someone
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
-    filename = save_uploaded_file(file)
+    filename = await save_uploaded_file(file)
 
-    result = await image_uploads_collection.insert_one({"filename": filename})
-
+    # result = await image_uploads_collection.insert_one({"filename": filename})
+    """
     return JSONResponse(
         content={
             "message": "Image uploaded",
@@ -79,11 +101,17 @@ async def upload_image(file: UploadFile = File(...)):
             "id": str(result.inserted_id),
         }
     )
+    """
+    return JSONResponse(
+        content={
+            "message": "Image uploaded",
+            "filename": filename,
+            "id": "1",
+        }
+    )
 
 
-# -----------------------
-# Endpoint 3: Find Person or Pet
-# -----------------------
+# Identify loved one
 @app.post("/find-person")
 async def find_person(
     photo: UploadFile = File(...),
@@ -91,7 +119,7 @@ async def find_person(
     last_name: str = Form(None),
     description: str = Form(...),
 ):
-    photo_filename = save_uploaded_file(photo)
+    photo_filename = await save_uploaded_file(photo)
 
     data = {
         "first_name": first_name,
@@ -100,8 +128,8 @@ async def find_person(
         "photo_filename": photo_filename,
     }
 
-    result = await sightings_collection.insert_one(data)
-
+    # result = await sightings_collection.insert_one(data)
+    """
     return JSONResponse(
         content={
             "message": "Sighting report submitted",
@@ -109,3 +137,15 @@ async def find_person(
             "data": data,
         }
     )
+    """
+    return JSONResponse(
+        content={
+            "message": "Sighting report submitted",
+            "id": "1",
+            "data": data,
+        }
+    )
+
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
