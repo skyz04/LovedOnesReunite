@@ -1,7 +1,5 @@
-.DS_Store
 .expo
 **/venv/
 **/__pycache__/
 **/cache/
 backend/.env
-
