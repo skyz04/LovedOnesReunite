@@ -3,4 +3,4 @@ motor
 pymongo
 python-multipart
 uvicorn
-
+dotenv

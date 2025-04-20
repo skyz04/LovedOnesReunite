@@ -2,3 +2,6 @@
 .expo
 **/venv/
 **/__pycache__/
+**/cache/
+backend/.env
+
