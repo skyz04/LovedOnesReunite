@@ -10,6 +10,9 @@ import io
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from tests.helper import search_pets
+from utils import helper
+from typing import Optional
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,6 +22,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
 
 async def save_uploaded_file(file: UploadFile) -> str:
     if not file or not file.filename:
@@ -50,9 +54,11 @@ async def report_missing(
     phone_number: str = Form(...),
 ):
     contents = await photo.read()
-    file_id = await db.fs_bucket.upload_from_stream(photo.filename, io.BytesIO(contents))
+    file_id = await db.fs_bucket.upload_from_stream(
+        photo.filename, io.BytesIO(contents)
+    )
 
-    #photo_filename = await save_uploaded_file(photo)
+    # photo_filename = await save_uploaded_file(photo)
 
     data = {
         "type": type,
@@ -85,14 +91,25 @@ async def report_missing(
 # Upload Poster for someone
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
+    # Save file to GridFS
     filename = await save_uploaded_file(file)
-
     result = await db.image_uploads_collection.insert_one({"filename": filename})
+
+    # Rewind and read image into a temp file
+    contents = await file.read()
+    temp_path = f"/tmp/{file.filename}"
+    with open(temp_path, "wb") as f:
+        f.write(contents)
+
+    # 🔍 Extract data using Claude + location geocoding
+    extracted_data = helper.extract_with_claude(temp_path)
+
     return JSONResponse(
         content={
-            "message": "Image uploaded",
+            "message": "Image uploaded and processed",
             "filename": filename,
             "id": str(result.inserted_id),
+            "extracted_data": extracted_data,
         }
     )
 
@@ -102,18 +119,18 @@ async def upload_image(file: UploadFile = File(...)):
 async def find_person(
     type: int = Form(...),
     photo: UploadFile = File(...),
-    full_name: str = Form(None),
-    gender: str = Form(None),
+    full_name: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
     lat: float = Form(...),
     lon: float = Form(...),
-    description: str = Form(...),
+    description: str = Form(...),  # Required field
 ):
     file_id = await save_uploaded_file(photo)
 
     grid_out = await db.fs_bucket.open_download_stream(ObjectId(file_id))
     image_data = await grid_out.read()
 
-    '''
+    """
     data = {
         "first_name": first_name,
         "last_name": last_name,
@@ -131,7 +148,7 @@ async def find_person(
             },
         }
     )
-    '''
+    """
     type_filtered_db = await db.missing_collection.find({"type": type}).to_list(None)
 
     if not type_filtered_db:
@@ -154,17 +171,19 @@ async def find_person(
 
     formatted_matches = []
     for match in matches[:3]:
-        formatted_matches.append({
-            "id": str(match["_id"]),
-            "description": match.get("description"),
-            "text_score": match.get("text_score"),
-            "image_score": match.get("image_score"),
-            "location_score": match.get("location_score"),
-            "combined_score": match.get("combined_score"),
-            "image_url": match.get('image_url'),
-            "contact": match.get("contact"),
-            "location": match.get("location"),
-        })
+        formatted_matches.append(
+            {
+                "id": str(match["_id"]),
+                "description": match.get("description"),
+                "text_score": match.get("text_score"),
+                "image_score": match.get("image_score"),
+                "location_score": match.get("location_score"),
+                "combined_score": match.get("combined_score"),
+                "image_url": match.get("image_url"),
+                "contact": match.get("contact"),
+                "location": match.get("location"),
+            }
+        )
 
     return JSONResponse(
         content={
